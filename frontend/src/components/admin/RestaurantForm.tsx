@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Input, Button } from "@/components/ui";
 import { restaurants as restaurantsApi } from "@/lib/api";
-import type { Cuisine, PriceRange, OpeningHours, Table } from "@/types/restaurant";
+import type { Cuisine, PriceRange, OpeningHours, Table, Restaurant } from "@/types/restaurant";
 
 const CUISINES: Cuisine[] = [
   "Italian", "French", "Japanese", "Chinese", "Indian", "Mexican",
@@ -19,12 +19,12 @@ const DAYS: OpeningHours["day"][] = [
   "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
 ];
 
-const DEFAULT_HOURS: OpeningHours[] = DAYS.map((day) => ({
-  day,
-  open: "09:00",
-  close: "22:00",
-  isClosed: day === "sunday",
-}));
+function buildHours(existing?: OpeningHours[]): OpeningHours[] {
+  return DAYS.map((day) => {
+    const found = existing?.find((h) => h.day === day);
+    return found ?? { day, open: "09:00", close: "22:00", isClosed: day === "sunday" };
+  });
+}
 
 interface FormState {
   name: string;
@@ -45,6 +45,51 @@ interface FormState {
   openingHours: OpeningHours[];
 }
 
+function fromRestaurant(r: Restaurant): FormState {
+  return {
+    name: r.name,
+    description: r.description ?? "",
+    cuisine: r.cuisine,
+    priceRange: r.priceRange,
+    street: r.address.street ?? "",
+    city: r.address.city,
+    state: r.address.state ?? "",
+    country: r.address.country,
+    zipCode: r.address.zipCode ?? "",
+    phone: r.phone ?? "",
+    email: r.email ?? "",
+    website: r.website ?? "",
+    coverImage: r.coverImage ?? "",
+    isFeatured: r.isFeatured,
+    tables: r.tables.length ? r.tables : [{ label: "Standard", capacity: 4, count: 5 }],
+    openingHours: buildHours(r.openingHours),
+  };
+}
+
+const DEFAULT_STATE: FormState = {
+  name: "",
+  description: "",
+  cuisine: [],
+  priceRange: "$$",
+  street: "",
+  city: "",
+  state: "",
+  country: "US",
+  zipCode: "",
+  phone: "",
+  email: "",
+  website: "",
+  coverImage: "",
+  isFeatured: false,
+  tables: [{ label: "Standard", capacity: 4, count: 5 }],
+  openingHours: buildHours(),
+};
+
+interface Props {
+  restaurantId?: string;
+  initialData?: Restaurant;
+}
+
 function SectionCard({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
   return (
     <div
@@ -60,29 +105,15 @@ function SectionCard({ title, subtitle, children }: { title: string; subtitle?: 
   );
 }
 
-export function RestaurantForm() {
+export function RestaurantForm({ restaurantId, initialData }: Props) {
   const router = useRouter();
+  const isEditing = !!restaurantId;
+
+  const [form, setForm] = useState<FormState>(
+    initialData ? fromRestaurant(initialData) : DEFAULT_STATE
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-
-  const [form, setForm] = useState<FormState>({
-    name: "",
-    description: "",
-    cuisine: [],
-    priceRange: "$$",
-    street: "",
-    city: "",
-    state: "",
-    country: "US",
-    zipCode: "",
-    phone: "",
-    email: "",
-    website: "",
-    coverImage: "",
-    isFeatured: false,
-    tables: [{ label: "Standard", capacity: 4, count: 5 }],
-    openingHours: DEFAULT_HOURS,
-  });
 
   function setField<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -135,30 +166,38 @@ export function RestaurantForm() {
       return;
     }
     setLoading(true);
+
+    const payload = {
+      name: form.name,
+      description: form.description || undefined,
+      cuisine: form.cuisine,
+      priceRange: form.priceRange,
+      address: {
+        street: form.street || undefined,
+        city: form.city,
+        state: form.state || undefined,
+        country: form.country,
+        zipCode: form.zipCode || undefined,
+      },
+      phone: form.phone || undefined,
+      email: form.email || undefined,
+      website: form.website || undefined,
+      coverImage: form.coverImage || null,
+      isFeatured: form.isFeatured,
+      tables: form.tables,
+      openingHours: form.openingHours,
+    };
+
     try {
-      const { restaurant } = await restaurantsApi.create({
-        name: form.name,
-        description: form.description || undefined,
-        cuisine: form.cuisine,
-        priceRange: form.priceRange,
-        address: {
-          street: form.street || undefined,
-          city: form.city,
-          state: form.state || undefined,
-          country: form.country,
-          zipCode: form.zipCode || undefined,
-        },
-        phone: form.phone || undefined,
-        email: form.email || undefined,
-        website: form.website || undefined,
-        coverImage: form.coverImage || null,
-        isFeatured: form.isFeatured,
-        tables: form.tables,
-        openingHours: form.openingHours,
-      });
-      router.push(`/restaurants/${restaurant._id}`);
+      if (isEditing) {
+        await restaurantsApi.update(restaurantId, payload);
+        router.push("/admin/restaurants");
+      } else {
+        const { restaurant } = await restaurantsApi.create(payload);
+        router.push(`/restaurants/${restaurant._id}`);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create restaurant.");
+      setError(err instanceof Error ? err.message : "Something went wrong.");
       setLoading(false);
     }
   }
@@ -277,59 +316,20 @@ export function RestaurantForm() {
               placeholder="123 Main St"
             />
           </div>
-          <Input
-            label="City *"
-            value={form.city}
-            onChange={(e) => setField("city", e.target.value)}
-            required
-            placeholder="Paris"
-          />
-          <Input
-            label="State / Region"
-            value={form.state}
-            onChange={(e) => setField("state", e.target.value)}
-            placeholder="Île-de-France"
-          />
-          <Input
-            label="Country"
-            value={form.country}
-            onChange={(e) => setField("country", e.target.value)}
-            placeholder="US"
-          />
-          <Input
-            label="ZIP / Postal code"
-            value={form.zipCode}
-            onChange={(e) => setField("zipCode", e.target.value)}
-            placeholder="75001"
-          />
+          <Input label="City *" value={form.city} onChange={(e) => setField("city", e.target.value)} required placeholder="Paris" />
+          <Input label="State / Region" value={form.state} onChange={(e) => setField("state", e.target.value)} placeholder="Île-de-France" />
+          <Input label="Country" value={form.country} onChange={(e) => setField("country", e.target.value)} placeholder="US" />
+          <Input label="ZIP / Postal code" value={form.zipCode} onChange={(e) => setField("zipCode", e.target.value)} placeholder="75001" />
         </div>
       </SectionCard>
 
       {/* ── Contact ────────────────────────────────────── */}
       <SectionCard title="Contact details">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Input
-            label="Phone"
-            type="tel"
-            value={form.phone}
-            onChange={(e) => setField("phone", e.target.value)}
-            placeholder="+1 555 000 0000"
-          />
-          <Input
-            label="Email"
-            type="email"
-            value={form.email}
-            onChange={(e) => setField("email", e.target.value)}
-            placeholder="contact@restaurant.com"
-          />
+          <Input label="Phone" type="tel" value={form.phone} onChange={(e) => setField("phone", e.target.value)} placeholder="+1 555 000 0000" />
+          <Input label="Email" type="email" value={form.email} onChange={(e) => setField("email", e.target.value)} placeholder="contact@restaurant.com" />
           <div className="sm:col-span-2">
-            <Input
-              label="Website"
-              type="url"
-              value={form.website}
-              onChange={(e) => setField("website", e.target.value)}
-              placeholder="https://restaurant.com"
-            />
+            <Input label="Website" type="url" value={form.website} onChange={(e) => setField("website", e.target.value)} placeholder="https://restaurant.com" />
           </div>
         </div>
       </SectionCard>
@@ -352,28 +352,29 @@ export function RestaurantForm() {
               <Input
                 label="Seats per table"
                 type="number"
-                min={1}
-                max={20}
+                min={1} max={20}
                 value={t.capacity}
                 onChange={(e) => updateTable(idx, { capacity: Math.max(1, parseInt(e.target.value) || 1) })}
               />
-              <Input
-                label="No. of tables"
-                type="number"
-                min={1}
-                value={t.count}
-                onChange={(e) => updateTable(idx, { count: Math.max(1, parseInt(e.target.value) || 1) })}
-              />
-              {form.tables.length > 1 && (
-                <button
-                  type="button"
-                  onClick={() => removeTable(idx)}
-                  className="text-body-sm cursor-pointer pb-2 whitespace-nowrap hover:underline"
-                  style={{ color: "var(--color-negative)" }}
-                >
-                  Remove
-                </button>
-              )}
+              <div className="flex gap-2 items-end">
+                <Input
+                  label="No. of tables"
+                  type="number"
+                  min={1}
+                  value={t.count}
+                  onChange={(e) => updateTable(idx, { count: Math.max(1, parseInt(e.target.value) || 1) })}
+                />
+                {form.tables.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => removeTable(idx)}
+                    className="text-body-sm cursor-pointer pb-2 whitespace-nowrap hover:underline"
+                    style={{ color: "var(--color-negative)" }}
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
             </div>
           ))}
         </div>
@@ -386,10 +387,7 @@ export function RestaurantForm() {
       <SectionCard title="Opening hours" subtitle="Check the days the restaurant is open.">
         <div className="flex flex-col divide-y" style={{ borderColor: "var(--color-canvas-soft)" }}>
           {form.openingHours.map((h) => (
-            <div
-              key={h.day}
-              className="flex items-center gap-4 py-3"
-            >
+            <div key={h.day} className="flex items-center gap-4 py-3">
               <label className="flex items-center gap-2 w-32 shrink-0 cursor-pointer">
                 <input
                   type="checkbox"
@@ -400,7 +398,6 @@ export function RestaurantForm() {
                 />
                 <span className="text-body-sm text-[var(--color-ink)] capitalize">{h.day}</span>
               </label>
-
               {h.isClosed ? (
                 <span className="text-body-sm text-[var(--color-mute)]">Closed</span>
               ) : (
@@ -427,17 +424,14 @@ export function RestaurantForm() {
         </div>
       </SectionCard>
 
-      {/* ── Submit ─────────────────────────────────────── */}
       {error && (
         <p className="text-body-sm text-[var(--color-negative)] px-1">{error}</p>
       )}
 
       <div className="flex justify-end gap-3 pb-4">
-        <Button type="button" variant="tertiary" onClick={() => router.back()}>
-          Cancel
-        </Button>
+        <Button type="button" variant="tertiary" onClick={() => router.back()}>Cancel</Button>
         <Button type="submit" variant="primary" disabled={loading}>
-          {loading ? "Creating…" : "Create restaurant"}
+          {loading ? (isEditing ? "Saving…" : "Creating…") : (isEditing ? "Save changes" : "Create restaurant")}
         </Button>
       </div>
     </form>

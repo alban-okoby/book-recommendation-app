@@ -1,17 +1,12 @@
 import Link from "next/link";
+import Image from "next/image";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faBolt, faGift, faArrowsRotate, faUtensils, faStar } from "@fortawesome/free-solid-svg-icons";
 import type { IconDefinition } from "@fortawesome/fontawesome-svg-core";
 import { Button, Badge, Card } from "@/components/ui";
 import { HeroBand, ContentBand } from "@/components/bands";
 import { BookingWidget } from "@/components/booking";
-
-// Placeholder featured restaurants (replaced by real API in Phase 4)
-const FEATURED = [
-  { id: "1", name: "Maison Dorée",  cuisine: "French",   price: "$$$", rating: 4.8, city: "Paris",  reviews: 142 },
-  { id: "2", name: "Sakura",        cuisine: "Japanese",  price: "$$",  rating: 4.6, city: "Tokyo",  reviews: 98  },
-  { id: "3", name: "La Pergola",    cuisine: "Italian",   price: "$$$$",rating: 4.9, city: "Rome",   reviews: 211 },
-];
+import type { Restaurant } from "@/types/restaurant";
 
 const FEATURES: { variant: "dark" | "green" | "sage"; icon: IconDefinition; title: string; body: string }[] = [
   {
@@ -34,7 +29,74 @@ const FEATURES: { variant: "dark" | "green" | "sage"; icon: IconDefinition; titl
   },
 ];
 
-export default function Home() {
+async function getFeaturedRestaurants(): Promise<Restaurant[]> {
+  try {
+    const res = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api"}/restaurants/featured`,
+      { next: { revalidate: 300 } }
+    );
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.restaurants ?? [];
+  } catch {
+    return [];
+  }
+}
+
+function FeaturedCard({ r }: { r: Restaurant }) {
+  return (
+    <Card variant="content" className="flex flex-col gap-[var(--spacing-md)]">
+      {/* Cover image */}
+      <div
+        className="relative w-full h-44 rounded-[var(--radius-lg)] overflow-hidden flex items-center justify-center"
+        style={{ backgroundColor: "var(--color-canvas-soft)" }}
+      >
+        {r.coverImage ? (
+          <Image src={r.coverImage} alt={r.name} fill className="object-cover" />
+        ) : (
+          <FontAwesomeIcon icon={faUtensils} className="text-display-md text-[var(--color-mute)]" />
+        )}
+      </div>
+
+      {/* Name + rating */}
+      <div className="flex items-start justify-between">
+        <div className="min-w-0">
+          <p className="text-body-md-strong text-[var(--color-ink)] truncate">{r.name}</p>
+          <p className="text-body-sm text-[var(--color-mute)]">
+            {r.address.city}{r.address.country !== "US" ? `, ${r.address.country}` : ""}
+          </p>
+        </div>
+        {r.ratings.count > 0 && (
+          <Badge variant="positive" className="shrink-0">
+            <FontAwesomeIcon icon={faStar} className="mr-1" />
+            {r.ratings.average.toFixed(1)}
+          </Badge>
+        )}
+      </div>
+
+      {/* Tags */}
+      <div className="flex flex-wrap items-center gap-[var(--spacing-xs)]">
+        {r.cuisine.slice(0, 2).map((c) => (
+          <Badge key={c} variant="neutral">{c}</Badge>
+        ))}
+        <Badge variant="neutral">{r.priceRange}</Badge>
+        {r.ratings.count > 0 && (
+          <span className="text-caption text-[var(--color-mute)]">
+            {r.ratings.count} review{r.ratings.count !== 1 ? "s" : ""}
+          </span>
+        )}
+      </div>
+
+      <Link href={`/restaurants/${r._id}`} className="mt-auto">
+        <Button variant="primary" className="w-full">Reserve a table</Button>
+      </Link>
+    </Card>
+  );
+}
+
+export default async function Home() {
+  const featured = await getFeaturedRestaurants();
+
   return (
     <>
       {/* ── Hero ──────────────────────────────────────────────── */}
@@ -64,35 +126,23 @@ export default function Home() {
         headline="Featured restaurants"
         subtext="Handpicked tables at the most acclaimed dining spots."
       >
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-[var(--spacing-xl)]">
-          {FEATURED.map((r) => (
-            <Card key={r.id} variant="content" className="flex flex-col gap-[var(--spacing-md)]">
-              <div
-                className="w-full h-44 rounded-[var(--radius-lg)] flex items-center justify-center"
-                style={{ backgroundColor: "var(--color-canvas-soft)" }}
-              >
-                <FontAwesomeIcon icon={faUtensils} className="text-display-md text-[var(--color-mute)]" />
-              </div>
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-body-md-strong text-[var(--color-ink)]">{r.name}</p>
-                  <p className="text-body-sm text-[var(--color-mute)]">{r.city}</p>
-                </div>
-                <Badge variant="positive">
-                  <FontAwesomeIcon icon={faStar} className="mr-1" /> {r.rating}
-                </Badge>
-              </div>
-              <div className="flex items-center gap-[var(--spacing-xs)]">
-                <Badge variant="neutral">{r.cuisine}</Badge>
-                <Badge variant="neutral">{r.price}</Badge>
-                <span className="text-caption text-[var(--color-mute)]">{r.reviews} reviews</span>
-              </div>
-              <Link href={`/restaurants/${r.id}`} className="mt-auto">
-                <Button variant="primary" className="w-full">Reserve a table</Button>
-              </Link>
-            </Card>
-          ))}
-        </div>
+        {featured.length > 0 ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-[var(--spacing-xl)]">
+            {featured.map((r) => (
+              <FeaturedCard key={r._id} r={r} />
+            ))}
+          </div>
+        ) : (
+          <div
+            className="rounded-[var(--radius-xl)] py-16 text-center"
+            style={{ background: "var(--color-canvas-soft)" }}
+          >
+            <FontAwesomeIcon icon={faUtensils} className="text-display-xs text-[var(--color-mute)] mb-3" />
+            <p className="text-body-md text-[var(--color-mute)]">
+              No featured restaurants yet — check back soon.
+            </p>
+          </div>
+        )}
 
         <div className="mt-[var(--spacing-3xl)] text-center">
           <Link href="/restaurants">
@@ -111,9 +161,7 @@ export default function Home() {
               <p
                 className="text-body-sm"
                 style={{
-                  color: variant === "dark"
-                    ? "var(--color-canvas-soft)"
-                    : "var(--color-body)",
+                  color: variant === "dark" ? "var(--color-canvas-soft)" : "var(--color-body)",
                 }}
               >
                 {body}
